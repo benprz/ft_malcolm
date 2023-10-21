@@ -16,7 +16,7 @@
 #include <net/if.h>
 #include <unistd.h>
 
-#define TARGET_ADDRESS "172.17.0.3"
+#define TARGET_ADDRESS "172.23.80.168"
 
 struct ifaddrs* find_interface(struct ifaddrs *ifaddr) {
 	struct ifaddrs *ifa;
@@ -72,7 +72,7 @@ int main() {
 	}
 
 	//create socket
-	int sfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ARP));
+	int sfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
 	if (sfd == -1) {
 		strerror(errno);
 		return 1;
@@ -80,34 +80,39 @@ int main() {
 
 	printf("Socket created\n");
 
-	//bind socket to interface
-	if (setsockopt(sfd, SOL_SOCKET, SO_BINDTODEVICE, interface->ifa_name, strlen(interface->ifa_name)) == -1) {
-		strerror(errno);        
-		return 1;
-	}
+	// //bind socket to interface
+	// if (setsockopt(sfd, SOL_SOCKET, SO_BINDTODEVICE, interface->ifa_name, strlen(interface->ifa_name)) == -1) {
+	// 	strerror(errno);        
+	// 	return 1;
+	// }
 
 	//recvfrom broadcast address of the interface arp packets
-	struct sockaddr_ll* recv_addr = (struct sockaddr_ll*)interface->ifa_broadaddr;
+	struct sockaddr_ll recv_addr;
+
+	recv_addr.sll_family = AF_PACKET;
+	recv_addr.sll_ifindex = if_nametoindex(interface->ifa_name);
+	recv_addr.sll_protocol = ETH_P_ARP;
+
 	socklen_t recv_addr_len = sizeof(recv_addr);
 	char recv_buf[ETH_FRAME_LEN];
 	int recv_len;
 
 	while (1) {
-		recv_len = recvfrom(sfd, recv_buf, ETH_FRAME_LEN, 0, (struct sockaddr *)recv_addr, &recv_addr_len);
+		recv_len = recvfrom(sfd, recv_buf, ETH_FRAME_LEN, 0, (struct sockaddr *)&recv_addr, &recv_addr_len);
 		if (recv_len == -1) {
 			strerror(errno);
 			return 1;
 		}
-
+		
 		printf("Received packet: %s\n", recv_buf);
 
 		//check if the packet is an arp packet
-		struct ether_header *eth_hdr = (struct ether_header *)recv_buf;
-		if (ntohs(eth_hdr->ether_type) == ETHERTYPE_ARP) {
-			printf("Received ARP packet\n");
+		// struct ether_header *eth_hdr = (struct ether_header *)recv_buf;
+		// if (ntohs(eth_hdr->ether_type) == ETHERTYPE_ARP) {
+			// printf("Received ARP packet\n");
 
 			//check if the packet is an arp reply
-			struct ether_arp *arp_hdr = (struct ether_arp *)(recv_buf + sizeof(struct ether_header));
+			// struct ether_arp *arp_hdr = (struct ether_arp *)(recv_buf + sizeof(struct ether_header));
 			// if (ntohs(arp_hdr->ea_hdr.ar_op) == ARPOP_REPLY) {
 			// 	printf("Received ARP reply\n");
 
@@ -148,7 +153,7 @@ int main() {
 			// 		printf("Sent ARP reply\n");
 			// 	}
 			// }
-		}
+		// }
 	}
 
 	close(sfd);
