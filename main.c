@@ -106,12 +106,16 @@ int main() {
 			return 1;
 		}
 		
-		printf("Received bytes: %d | Received packet: %s\n", recv_len, recv_buf);
-
 		//check if the packet is an arp packet
-		// struct ether_header *eth_hdr = (struct ether_header *)recv_buf;
-		// if (ntohs(eth_hdr->ether_type) == ETHERTYPE_ARP) {
-			// printf("Received ARP packet\n");
+		struct ether_header *eth_hdr = (struct ether_header *)recv_buf;
+		if (ntohs(eth_hdr->ether_type) == ETHERTYPE_ARP) {
+			//print header
+			printf("Received ARP packet ! (%d bytes)\n", recv_len);
+			printf("Type: %d\n", ntohs(eth_hdr->ether_type));
+			printf("Sender MAC: %s\n", ether_ntoa((struct ether_addr *)eth_hdr->ether_shost));
+			printf("Sender IP: %s\n", inet_ntoa(*(struct in_addr *)(recv_buf + sizeof(struct ether_header) + 14)));
+			printf("Target MAC: %s\n", ether_ntoa((struct ether_addr *)eth_hdr->ether_dhost));
+		}
 
 			//check if the packet is an arp reply
 			// struct ether_arp *arp_hdr = (struct ether_arp *)(recv_buf + sizeof(struct ether_header));
