@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include <sys/socket.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -16,7 +18,7 @@
 #include <net/if.h>
 #include <unistd.h>
 
-#define TARGET_ADDRESS "172.23.80.168"
+#define TARGET_ADDRESS "172.17.0.3"
 
 struct ifaddrs* find_interface(struct ifaddrs *ifaddr) {
 	struct ifaddrs *ifa;
@@ -72,7 +74,7 @@ int main() {
 	}
 
 	//create socket
-	int sfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+	int sfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ARP));
 	if (sfd == -1) {
 		strerror(errno);
 		return 1;
@@ -104,7 +106,7 @@ int main() {
 			return 1;
 		}
 		
-		printf("Received packet: %s\n", recv_buf);
+		printf("Received bytes: %d | Received packet: %s\n", recv_len, recv_buf);
 
 		//check if the packet is an arp packet
 		// struct ether_header *eth_hdr = (struct ether_header *)recv_buf;
