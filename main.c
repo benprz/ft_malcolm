@@ -18,7 +18,10 @@
 #include <net/if.h>
 #include <unistd.h>
 
-#define TARGET_ADDRESS "172.17.0.3"
+#define SOURCE_IP_ADDRESS "172.17.0.12"
+#define SOURCE_MAC_ADDRESS "ff:ff:ff:ff:ff:ff"
+#define TARGET_IP_ADDRESS "172.17.0.3"
+#define TARGET_MAC_ADDRESS "02:42:ac:11:00:03"
 
 struct ifaddrs* find_interface(struct ifaddrs *ifaddr) {
 	struct ifaddrs *ifa;
@@ -40,7 +43,7 @@ struct ifaddrs* find_interface(struct ifaddrs *ifaddr) {
 			//check if the broadcast address is from the same network using the ifa_netmask
 			struct sockaddr_in *mask = (struct sockaddr_in *)ifa->ifa_netmask;
 			struct sockaddr_in target;
-			if (inet_pton(AF_INET, TARGET_ADDRESS, &(target.sin_addr)) == 0) {
+			if (inet_pton(AF_INET, TARGET_IP_ADDRESS, &(target.sin_addr)) == 0) {
 				strerror(errno);
 				break ;
 			}
@@ -108,14 +111,36 @@ int main() {
 		
 		//check if the packet is an arp packet
 		struct ether_header *eth_hdr = (struct ether_header *)recv_buf;
+		struct ether_arp *arp_hdr = (struct ether_arp *)(recv_buf + sizeof(struct ether_header));
+
 		if (ntohs(eth_hdr->ether_type) == ETHERTYPE_ARP) {
+
+			//stock sender ip from arp packet
+			char sender_ip[INET_ADDRSTRLEN];
+			char target_ip[INET_ADDRSTRLEN];
+			if (inet_ntop(AF_INET, arp_hdr->arp_spa, sender_ip, sizeof(sender_ip)) == NULL) {
+				strerror(errno);
+				return 1;
+			}
+			if (inet_ntop(AF_INET, arp_hdr->arp_tpa, target_ip, sizeof(target_ip)) == NULL) {
+				strerror(errno);
+				return 1;
+			}
+
 			//print header
 			printf("Received ARP packet ! (%d bytes)\n", recv_len);
-			printf("Type: %d\n", ntohs(eth_hdr->ether_type));
-			printf("Sender MAC: %s\n", ether_ntoa((struct ether_addr *)eth_hdr->ether_shost));
-			printf("Sender IP: %s\n", inet_ntoa(*(struct in_addr *)(recv_buf + sizeof(struct ether_header) + 14)));
-			printf("Target MAC: %s\n", ether_ntoa((struct ether_addr *)eth_hdr->ether_dhost));
+
+			if (strcmp(sender_ip, TARGET_IP_ADDRESS) == 0)// && strcmp(target_ip, SOURCE_IP_ADDRESS) == 0)
+			{
+				printf("Opcode: %d\n", ntohs(arp_hdr->ea_hdr.ar_op));
+				printf("Sender MAC: %s\n", ether_ntoa((struct ether_addr *)arp_hdr->arp_sha));
+				printf("Sender IP: %s\n", sender_ip);
+				printf("Target MAC: %s\n", ether_ntoa((struct ether_addr *)arp_hdr->arp_tha));
+				printf("Target IP: %s\n", target_ip);
+				printf("\n");
+			}
 		}
+		
 
 			//check if the packet is an arp reply
 			// struct ether_arp *arp_hdr = (struct ether_arp *)(recv_buf + sizeof(struct ether_header));
@@ -124,7 +149,7 @@ int main() {
 
 			// 	//check if the packet is for the target
 			// 	struct in_addr target_addr;
-			// 	if (inet_pton(AF_INET, TARGET_ADDRESS, &target_addr) == 0) {
+			// 	if (inet_pton(AF_INET, TARGET_IP_ADDRESS, &target_addr) == 0) {
 			// 		strerror(errno);
 			// 		return 1;
 			// 	}
