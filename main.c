@@ -18,9 +18,9 @@
 #include <net/if.h>
 #include <unistd.h>
 
-#define SOURCE_IP_ADDRESS "172.17.0.1"
+#define SOURCE_IP_ADDRESS "10.0.2.16"
 #define SOURCE_MAC_ADDRESS "ff:ff:ff:ff:ff:ff"
-#define TARGET_IP_ADDRESS "172.17.0.3"
+#define TARGET_IP_ADDRESS "10.0.2.15"
 #define TARGET_MAC_ADDRESS "02:42:ac:11:00:03"
 
 struct ifaddrs* find_interface(struct ifaddrs *ifaddr) {
@@ -108,7 +108,7 @@ int main() {
 			strerror(errno);
 			return 1;
 		}
-		
+		printf("Received packet!\n");
 		//check if the packet is an arp packet
 		struct ether_header *eth_hdr = (struct ether_header *)recv_buf;
 		struct ether_arp *arp_hdr = (struct ether_arp *)(recv_buf + sizeof(struct ether_header));
@@ -128,16 +128,16 @@ int main() {
 			}
 
 			//print header
-			printf("Received ARP packet ! (%d bytes)\n", recv_len);
-
-			if (strcmp(sender_ip, TARGET_IP_ADDRESS) == 0)// && strcmp(target_ip, SOURCE_IP_ADDRESS) == 0)
+			printf("\tIt's an ARP packet ! (%d bytes)\n", recv_len);
+			printf("\tOpcode: %d\n", ntohs(arp_hdr->ea_hdr.ar_op));
+			printf("\tSender MAC: %s\n", ether_ntoa((struct ether_addr *)arp_hdr->arp_sha));
+			printf("\tSender IP: %s\n", sender_ip);
+			printf("\tTarget MAC: %s\n", ether_ntoa((struct ether_addr *)arp_hdr->arp_tha));
+			printf("\tTarget IP: %s\n", target_ip);
+			printf("\n");
+			if (strcmp(sender_ip, TARGET_IP_ADDRESS) == 0 && strcmp(target_ip, SOURCE_IP_ADDRESS) == 0)
 			{
-				printf("Opcode: %d\n", ntohs(arp_hdr->ea_hdr.ar_op));
-				printf("Sender MAC: %s\n", ether_ntoa((struct ether_addr *)arp_hdr->arp_sha));
-				printf("Sender IP: %s\n", sender_ip);
-				printf("Target MAC: %s\n", ether_ntoa((struct ether_addr *)arp_hdr->arp_tha));
-				printf("Target IP: %s\n", target_ip);
-				printf("\n");
+				printf("\t\tpacket fit parameters\n");
 			}
 		}
 		
