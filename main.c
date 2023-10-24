@@ -18,7 +18,7 @@
 #include <net/if.h>
 #include <unistd.h>
 
-#define SOURCE_IP_ADDRESS "172.17.0.12"
+#define SOURCE_IP_ADDRESS "172.17.0.1"
 #define SOURCE_MAC_ADDRESS "ff:ff:ff:ff:ff:ff"
 #define TARGET_IP_ADDRESS "172.17.0.3"
 #define TARGET_MAC_ADDRESS "02:42:ac:11:00:03"
