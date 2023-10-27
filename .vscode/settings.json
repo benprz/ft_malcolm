@@ -1,9 +1,0 @@
-{
-	"files.associations": {
-		"ifaddrs.h": "c",
-		"ethernet.h": "c",
-		"if_ether.h": "c",
-		"socket.h": "c",
-		"if.h": "c"
-	}
-}
