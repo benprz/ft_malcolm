@@ -18,15 +18,15 @@
 #include <net/if.h>
 #include <unistd.h>
 
-// #define SOURCE_IP_ADDRESS "10.0.2.16"
-// #define SOURCE_MAC_ADDRESS "ff:ff:ff:ff:ff:ff"
-// #define TARGET_IP_ADDRESS "10.0.2.15"
-// #define TARGET_MAC_ADDRESS "02:42:ac:11:00:03"
+// #define REQUESTED_IP_ADRESS "10.0.2.16"
+// #define REQUESTED_MAC_ADDRESS "ff:ff:ff:ff:ff:ff"
+// #define REQUESTER_IP_ADDRESS "10.0.2.15"
+// #define REQUESTER_MAC_ADDRESS "02:42:ac:11:00:03"
 
-#define SOURCE_IP_ADDRESS "172.17.0.16"
-#define SOURCE_MAC_ADDRESS "02:42:ac:11:00:03"
-#define TARGET_IP_ADDRESS "172.17.0.2"
-#define TARGET_MAC_ADDRESS "02:42:ac:11:00:03"
+#define REQUESTED_IP_ADDRESS "172.17.0.16"
+#define REQUESTED_MAC_ADDRESS "02:42:ac:11:00:03"
+#define REQUESTER_IP_ADDRESS "172.17.0.2"
+#define REQUESTER_MAC_ADDRESS "02:42:ac:11:00:03"
 
 struct ifaddrs* find_interface(struct ifaddrs *ifaddr) {
 	struct ifaddrs *ifa;
@@ -48,7 +48,7 @@ struct ifaddrs* find_interface(struct ifaddrs *ifaddr) {
 			//check if the broadcast address is from the same network using the ifa_netmask
 			struct sockaddr_in *mask = (struct sockaddr_in *)ifa->ifa_netmask;
 			struct sockaddr_in target;
-			if (inet_pton(AF_INET, TARGET_IP_ADDRESS, &(target.sin_addr)) == 0) {
+			if (inet_pton(AF_INET, REQUESTER_IP_ADDRESS, &(target.sin_addr)) == 0) {
 				strerror(errno);
 				break ;
 			}
@@ -144,16 +144,16 @@ int main() {
 			printf("\t\tTarget MAC: %s\n", ether_ntoa((struct ether_addr *)arp_hdr->arp_tha));
 			printf("\t\tTarget IP: %s\n", target_ip);
 			printf("\n");
-			if (strcmp(sender_ip, TARGET_IP_ADDRESS) == 0 && strcmp(target_ip, SOURCE_IP_ADDRESS) == 0)
+			if (strcmp(sender_ip, REQUESTER_IP_ADDRESS) == 0 && strcmp(target_ip, REQUESTED_IP_ADDRESS) == 0)
 			{
-				//send arp reply to sender ip, giving SOURCE_MAC_ADDRESS as the mac address of the target ip
+				//send arp reply to sender ip, giving REQUESTED_MAC_ADDRESS as the mac address of the target ip
 				struct ether_header eth_hdr;
 				struct ether_arp arp_hdr;
 
 				//fill ethernet header
 				eth_hdr.ether_type = htons(ETHERTYPE_ARP);
-				ether_aton_r(SOURCE_MAC_ADDRESS, (struct ether_addr *)eth_hdr.ether_shost);
-				ether_aton_r(TARGET_MAC_ADDRESS, (struct ether_addr *)eth_hdr.ether_dhost);
+				ether_aton_r(REQUESTED_MAC_ADDRESS, (struct ether_addr *)eth_hdr.ether_shost);
+				ether_aton_r(REQUESTER_MAC_ADDRESS, (struct ether_addr *)eth_hdr.ether_dhost);
 
 				//fill arp header
 				arp_hdr.arp_hrd = htons(ARPHRD_ETHER);
@@ -161,10 +161,10 @@ int main() {
 				arp_hdr.arp_hln = ETHER_ADDR_LEN;
 				arp_hdr.arp_pln = sizeof(in_addr_t);
 				arp_hdr.arp_op = htons(ARPOP_REPLY);
-				ether_aton_r(SOURCE_MAC_ADDRESS, (struct ether_addr *)arp_hdr.arp_sha);
-				inet_pton(AF_INET, SOURCE_IP_ADDRESS, arp_hdr.arp_spa);
-				ether_aton_r(TARGET_MAC_ADDRESS, (struct ether_addr *)arp_hdr.arp_tha);
-				inet_pton(AF_INET, TARGET_IP_ADDRESS, arp_hdr.arp_tpa);
+				ether_aton_r(REQUESTED_MAC_ADDRESS, (struct ether_addr *)arp_hdr.arp_sha);
+				inet_pton(AF_INET, REQUESTED_IP_ADDRESS, arp_hdr.arp_spa);
+				ether_aton_r(REQUESTER_MAC_ADDRESS, (struct ether_addr *)arp_hdr.arp_tha);
+				inet_pton(AF_INET, REQUESTER_IP_ADDRESS, arp_hdr.arp_tpa);
 
 				//fill buffer
 				char buf[ETHER_HDR_LEN + sizeof(struct ether_arp)];
