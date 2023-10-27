@@ -24,7 +24,7 @@
 // #define TARGET_MAC_ADDRESS "02:42:ac:11:00:03"
 
 #define SOURCE_IP_ADDRESS "172.17.0.16"
-#define SOURCE_MAC_ADDRESS "ff:ff:ff:ff:ff:ff"
+#define SOURCE_MAC_ADDRESS "02:42:ac:11:00:03"
 #define TARGET_IP_ADDRESS "172.17.0.2"
 #define TARGET_MAC_ADDRESS "02:42:ac:11:00:03"
 
@@ -146,54 +146,52 @@ int main() {
 			printf("\n");
 			if (strcmp(sender_ip, TARGET_IP_ADDRESS) == 0 && strcmp(target_ip, SOURCE_IP_ADDRESS) == 0)
 			{
-				printf("\t\tpacket fit parameters\n");
+				//send arp reply to sender ip, giving SOURCE_MAC_ADDRESS as the mac address of the target ip
+				struct ether_header eth_hdr;
+				struct ether_arp arp_hdr;
+
+				//fill ethernet header
+				eth_hdr.ether_type = htons(ETHERTYPE_ARP);
+				ether_aton_r(SOURCE_MAC_ADDRESS, (struct ether_addr *)eth_hdr.ether_shost);
+				ether_aton_r(TARGET_MAC_ADDRESS, (struct ether_addr *)eth_hdr.ether_dhost);
+
+				//fill arp header
+				arp_hdr.arp_hrd = htons(ARPHRD_ETHER);
+				arp_hdr.arp_pro = htons(ETHERTYPE_IP);
+				arp_hdr.arp_hln = ETHER_ADDR_LEN;
+				arp_hdr.arp_pln = sizeof(in_addr_t);
+				arp_hdr.arp_op = htons(ARPOP_REPLY);
+				ether_aton_r(SOURCE_MAC_ADDRESS, (struct ether_addr *)arp_hdr.arp_sha);
+				inet_pton(AF_INET, SOURCE_IP_ADDRESS, arp_hdr.arp_spa);
+				ether_aton_r(TARGET_MAC_ADDRESS, (struct ether_addr *)arp_hdr.arp_tha);
+				inet_pton(AF_INET, TARGET_IP_ADDRESS, arp_hdr.arp_tpa);
+
+				//fill buffer
+				char buf[ETHER_HDR_LEN + sizeof(struct ether_arp)];
+				memcpy(buf, &eth_hdr, sizeof(struct ether_header));
+				memcpy(buf + sizeof(struct ether_header), &arp_hdr, sizeof(struct ether_arp));
+
+				//print packet
+				printf("Sending packet:\n");
+				printf("\tSource MAC: %s\n", ether_ntoa((struct ether_addr *)eth_hdr.ether_shost));
+				printf("\tTarget MAC: %s\n", ether_ntoa((struct ether_addr *)eth_hdr.ether_dhost));
+				printf("\t\tIt's an ARP packet ! (%ld bytes)\n", sizeof(buf));
+				printf("\t\tOpcode: %d\n", ntohs(arp_hdr.arp_op));
+				printf("\t\tSender MAC: %s\n", ether_ntoa((struct ether_addr *)arp_hdr.arp_sha));
+				printf("\t\tSender IP: %s\n", inet_ntoa(*(struct in_addr *)arp_hdr.arp_spa));
+				printf("\t\tTarget MAC: %s\n", ether_ntoa((struct ether_addr *)arp_hdr.arp_tha));
+				printf("\t\tTarget IP: %s\n", inet_ntoa(*(struct in_addr *)arp_hdr.arp_tpa));
+				printf("\n");
+
+				//send packet
+				if (sendto(sfd, buf, sizeof(buf), 0, (struct sockaddr *)&recv_addr, sizeof(recv_addr)) == -1) {
+					strerror(errno);
+					return 1;
+				}
+				printf("Sent packet!\n");
+				break ;
 			}
 		}
-		
-
-			//check if the packet is an arp reply
-			// struct ether_arp *arp_hdr = (struct ether_arp *)(recv_buf + sizeof(struct ether_header));
-			// if (ntohs(arp_hdr->ea_hdr.ar_op) == ARPOP_REPLY) {
-			// 	printf("Received ARP reply\n");
-
-			// 	//check if the packet is for the target
-			// 	struct in_addr target_addr;
-			// 	if (inet_pton(AF_INET, TARGET_IP_ADDRESS, &target_addr) == 0) {
-			// 		strerror(errno);
-			// 		return 1;
-			// 	}
-
-			// 	if (memcmp(arp_hdr->arp_tpa, &target_addr, sizeof(target_addr)) == 0) {
-			// 		printf("Received ARP reply for target\n");
-
-			// 		//send arp reply to the sender
-			// 		struct ether_arp *arp_hdr = (struct ether_arp *)(recv_buf + sizeof(struct ether_header));
-			// 		struct ether_header *eth_hdr = (struct ether_header *)recv_buf;
-
-			// 		//swap sender and target
-			// 		memcpy(eth_hdr->ether_dhost, eth_hdr->ether_shost, ETH_ALEN);
-			// 		memcpy(eth_hdr->ether_shost, interface->ifa_addr->sa_data, ETH_ALEN);
-			// 		memcpy(arp_hdr->arp_tha, arp_hdr->arp_sha, ETH_ALEN);
-			// 		memcpy(arp_hdr->arp_sha, interface->ifa_addr->sa_data, ETH_ALEN);
-
-			// 		//set target ip to sender ip
-			// 		memcpy(arp_hdr->arp_tpa, arp_hdr->arp_spa, sizeof(arp_hdr->arp_tpa));
-
-			// 		//set sender ip to target ip
-			// 		memcpy(arp_hdr->arp_spa, &target_addr, sizeof(arp_hdr->arp_spa));
-
-			// 		//set opcode to arp reply
-			// 		arp_hdr->ea_hdr.ar_op = htons(ARPOP_REPLY);
-
-			// 		//send packet
-			// 		if (sendto(sfd, recv_buf, recv_len, 0, (struct sockaddr *)&recv_addr, sizeof(recv_addr)) == -1) {
-			// 			strerror(errno);
-			// 			return 1;
-			// 		}
-			// 		printf("Sent ARP reply\n");
-			// 	}
-			// }
-		// }
 	}
 
 	close(sfd);
