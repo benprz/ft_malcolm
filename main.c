@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <fcntl.h>
+#include <signal.h>
 
 #include "libft.h"
 
@@ -28,11 +29,22 @@ struct host {
 	struct ether_addr mac_addr;
 };
 
+int g_sfd;
+bool g_loop = true;
+
 // program options
 struct host g_host;
 struct host g_requested_host;
 struct ether_addr g_mac_address;
 bool g_verbose = false;
+
+
+void handle_sigint(int sig) 
+{ 
+    // can be called asynchronously
+    g_loop = false; // set flag
+	close(g_sfd);
+} 
 
 void print_ethernet_header(struct ether_header *eth_hdr)
 {
@@ -97,7 +109,7 @@ int ft_ether_aton(const char *asc, struct ether_addr *haddr)
 	return 1; // Valid MAC address
 }
 
-void send_arp_reply(int sfd, uint8_t *host_ip, uint8_t *host_mac, uint8_t *requested_ip, struct sockaddr_ll *recv_addr)
+void send_arp_reply(uint8_t *host_ip, uint8_t *host_mac, uint8_t *requested_ip, struct sockaddr_ll *recv_addr)
 {
 	struct ether_header eth_hdr;
 	struct ether_arp arp_hdr;
@@ -129,7 +141,7 @@ void send_arp_reply(int sfd, uint8_t *host_ip, uint8_t *host_mac, uint8_t *reque
 	print_arp_header(&arp_hdr, sizeof(buf));
 
 	// send packet to requester
-	if (sendto(sfd, buf, sizeof(buf), 0, (struct sockaddr *)recv_addr, sizeof(struct sockaddr_ll)) == -1)
+	if (sendto(g_sfd, buf, sizeof(buf), 0, (struct sockaddr *)recv_addr, sizeof(struct sockaddr_ll)) == -1)
 	{
 		strerror(errno);
 		return;
@@ -137,22 +149,36 @@ void send_arp_reply(int sfd, uint8_t *host_ip, uint8_t *host_mac, uint8_t *reque
 	printf("\t\tSent reply!\n");
 }
 
-void handle_arp_packets(int sfd)
+int handle_arp_packets()
 {
 	struct sockaddr_ll recv_addr;
 	socklen_t recv_addr_len = sizeof(recv_addr);
 	char recv_buf[ETH_FRAME_LEN];
 	int recv_len;
 
-	memset(&recv_addr, 0, sizeof(recv_addr));
+	struct sigaction act;
+    act.sa_handler = handle_sigint;
+    sigemptyset(&act.sa_mask);
 
-	while (1)
+    if (sigaction(SIGINT, &act, NULL) < 0) {
+        perror("sigaction");
+        return 1;
+    }
+
+	while (g_loop)
 	{
-		recv_len = recvfrom(sfd, recv_buf, ETH_FRAME_LEN, 0, (struct sockaddr *)&recv_addr, &recv_addr_len);
-		if (recv_len == -1) {
-			strerror(errno);
-			return;
+		memset(&recv_addr, 0, sizeof(recv_addr));
+		printf("Waiting for packet...\n");
+		recv_len = recvfrom(g_sfd, recv_buf, ETH_FRAME_LEN, 0, (struct sockaddr *)&recv_addr, &recv_addr_len);
+		if (recv_len == -1 && g_loop) {
+			printf("Error receiving packet: %s\n", strerror(errno));
+			return 1;
 		}
+		else if (g_loop == false) {
+			printf("Received SIGINT, exiting...\n");
+			break;
+		}
+		printf("\n##############################################\n");
 		printf("Received packet!\n");
 		struct ether_header *eth_hdr = (struct ether_header *)recv_buf;
 		struct ether_arp *arp_hdr = (struct ether_arp *)(recv_buf + sizeof(struct ether_header));
@@ -168,16 +194,22 @@ void handle_arp_packets(int sfd)
 			if ((ft_memcmp(&arp_hdr->arp_spa, &g_host.ip_addr.s_addr, sizeof(in_addr_t)) == 0) ||
 				(ft_memcmp(&arp_hdr->arp_sha, &g_host.mac_addr.ether_addr_octet, ETHER_ADDR_LEN) == 0)) 
 			{
+				printf("\tARP request matches provided host data.\n");
 				//if request host ip is not null, then the option -r was used and we need to check if the requested host ip is the same as the one in the packet before sending the reply
 				if (g_requested_host.ip_addr.s_addr != 0 && ft_memcmp(&arp_hdr->arp_tpa, &g_requested_host.ip_addr.s_addr, sizeof(in_addr_t)) != 0)
 					continue;
 
 				// send arp reply
-				send_arp_reply(sfd, arp_hdr->arp_spa, arp_hdr->arp_sha, arp_hdr->arp_tpa, &recv_addr);
-				break ;
+				printf("\tSending ARP reply...\n");
+				send_arp_reply(arp_hdr->arp_spa, arp_hdr->arp_sha, arp_hdr->arp_tpa, &recv_addr);
 			}
 		}
+		else {
+			printf("\tIt's not a request!\n");
+			print_arp_header(arp_hdr, recv_len);
+		}
 	}
+	return 0;
 }
 
 struct ifaddrs *find_interface(struct ifaddrs *ifaddr)
@@ -208,7 +240,8 @@ struct ifaddrs *find_interface(struct ifaddrs *ifaddr)
 			else if (g_host.ip_addr.s_addr == 0) {
 				for (int i = 0; g_host.ip_list[i] != NULL; i++) {
 					in_addr_t ip = *(in_addr_t *)g_host.ip_list[i];
-					printf("Checking if %s is in the same network as %s\n", inet_ntoa(*(struct in_addr *)&ip), broad_addr_str);
+					if (g_verbose)
+						printf("Checking if %s is in the same network as %s\n", inet_ntoa(*(struct in_addr *)&ip), broad_addr_str);
 					//print results of bits operations
 					if ((ip & mask->sin_addr.s_addr) == (broad_addr->sin_addr.s_addr & mask->sin_addr.s_addr)) {
 						printf("Found interface %s with broadcast address %s\n", ifa->ifa_name, broad_addr_str);
@@ -216,7 +249,8 @@ struct ifaddrs *find_interface(struct ifaddrs *ifaddr)
 						return ifa;
 					}
 					else {
-						printf("%s is not in the same network as %s\n", inet_ntoa(*(struct in_addr *)&ip), broad_addr_str);
+						if (g_verbose)
+							printf("%s is not in the same network as %s\n", inet_ntoa(*(struct in_addr *)&ip), broad_addr_str);
 					}
 				}
 			}
@@ -258,46 +292,41 @@ int get_mac_address(char *iface, unsigned char *mac) {
 	return 0;
 }
 
-void create_socket()
+int create_socket()
 {
 	// create socket
-	int sfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ARP));
-	if (sfd == -1)
+	g_sfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ARP));
+	if (g_sfd == -1)
 	{
 		strerror(errno);
-		return;
+		return 1;
 	}
 
 	// find interface
 	struct ifaddrs *ifaddr, *interface;
 	if (getifaddrs(&ifaddr) == -1) {
 		strerror(errno);
-		return;
+		return 1;
 	}
 	if ((interface = find_interface(ifaddr)) == NULL) {
-		return;
+		return 1;
 	}
 	// if g_mac_address is not set, use the interface mac address
 	if (g_mac_address.ether_addr_octet[0] == 0 && g_mac_address.ether_addr_octet[1] == 0 && g_mac_address.ether_addr_octet[2] == 0 && g_mac_address.ether_addr_octet[3] == 0 && g_mac_address.ether_addr_octet[4] == 0 && g_mac_address.ether_addr_octet[5] == 0) {
 		if (get_mac_address(interface->ifa_name, g_mac_address.ether_addr_octet) == 1) {
-			return;
+			return 1;
 		}
 	}
 
-	printf("Using interface %s with MAC address %s\n", interface->ifa_name, ether_ntoa(&g_mac_address));
-
 	// set interface to socket
-	if (setsockopt(sfd, SOL_SOCKET, SO_BINDTODEVICE, interface->ifa_name, ft_strlen(interface->ifa_name)) == -1) {
+	if (setsockopt(g_sfd, SOL_SOCKET, SO_BINDTODEVICE, interface->ifa_name, ft_strlen(interface->ifa_name)) == -1) {
 		strerror(errno);
-		return;
+		return 1;
 	}
 	freeifaddrs(ifaddr);
 
 	// handle arp packets
-	handle_arp_packets(sfd);
-
-	// close socket
-	close(sfd);
+	return handle_arp_packets();
 }
 
 
@@ -394,7 +423,5 @@ int main(int argc, char **argv)
 	if (get_args(argc, argv) == 1)
 		return 1;
 
-	create_socket();
-
-	return 0;
+	return create_socket();
 }
