@@ -40,10 +40,12 @@ bool g_verbose = false;
 
 
 void handle_sigint(int sig) 
-{ 
-    // can be called asynchronously
-    g_loop = false; // set flag
-	close(g_sfd);
+{
+	if (sig == SIGINT) {
+		// can be called asynchronously
+		g_loop = false; // set flag
+		close(g_sfd);
+	}
 } 
 
 void print_ethernet_header(struct ether_header *eth_hdr)
@@ -232,7 +234,7 @@ struct ifaddrs *find_interface(struct ifaddrs *ifaddr)
 			// check if the broadcast address is from the same network using the ifa_netmask
 			struct sockaddr_in *mask = (struct sockaddr_in *)ifa->ifa_netmask;
 
-			if (g_host.ip_addr.s_addr & mask->sin_addr.s_addr == broad_addr->sin_addr.s_addr & mask->sin_addr.s_addr) {
+			if ((g_host.ip_addr.s_addr & mask->sin_addr.s_addr) == (broad_addr->sin_addr.s_addr & mask->sin_addr.s_addr)) {
 				printf("Found interface %s with broadcast address %s\n", ifa->ifa_name, broad_addr_str);
 				return ifa;
 			}
