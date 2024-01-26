@@ -1,7 +1,7 @@
 #MAKEFLAGS += --silent
 
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -Wpedantic 
+CFLAGS = -Wall -Wextra -Werror -Wpedantic -g
 INC_DIR = includes/
 
 EXE = ft_malcolm

