@@ -22,6 +22,12 @@
 
 #include "libft.h"
 
+enum e_host_type
+{
+	IP_ADDRESS,
+	MAC_ADDRESS,
+	HOSTNAME
+};
 
 struct s_host
 {
@@ -36,6 +42,8 @@ struct s_env
 	int sfd;
 	int loop;
 
+	int given_host_type;
+
 	// program options
 	struct s_host host;
 	struct s_host requested_host;
@@ -47,6 +55,7 @@ struct s_env
 struct s_env g_env = {
 	.sfd = 0,
 	.loop = true,
+	.given_host_type = 0,
 	.host = {
 		.h_name = NULL,
 		.ip_addr = {0},
@@ -77,8 +86,8 @@ void print_ethernet_header(struct ether_header *eth_hdr)
 {
 	if (g_env.verbose)
 	{
-		printf("     Source MAC: %s\n", ether_ntoa((struct ether_addr *)eth_hdr->ether_shost));
-		printf("     Target MAC: %s\n", ether_ntoa((struct ether_addr *)eth_hdr->ether_dhost));
+		printf("     Source MAC: %s\n", ft_ether_ntoa((struct ether_addr *)eth_hdr->ether_shost));
+		printf("     Target MAC: %s\n", ft_ether_ntoa((struct ether_addr *)eth_hdr->ether_dhost));
 	}
 }
 
@@ -106,34 +115,12 @@ void print_arp_header(struct ether_arp *arp_hdr, int recv_len)
 		printf("       Protocol size: %d\n", arp_hdr->arp_pln);
 		printf("       Opcode: %s\n", ntohs(arp_hdr->arp_op) == ARPOP_REQUEST ? "Request" : ntohs(arp_hdr->arp_op) == ARPOP_REPLY ? "Reply"
 																															   : "Unknown");
-		printf("       Sender MAC: %s\n", ether_ntoa((struct ether_addr *)arp_hdr->arp_sha));
+		printf("       Sender MAC: %s\n", ft_ether_ntoa((struct ether_addr *)arp_hdr->arp_sha));
 		printf("       Sender IP: %s\n", sender_ip_str);
-		printf("       Target MAC: %s\n", ether_ntoa((struct ether_addr *)arp_hdr->arp_tha));
+		printf("       Target MAC: %s\n", ft_ether_ntoa((struct ether_addr *)arp_hdr->arp_tha));
 		printf("       Target IP: %s\n", target_ip_str);
 		printf("       Packet length: %d\n", recv_len);
 	}
-}
-
-// function to convert a string to a mac address as ether_addr
-int ft_ether_aton(const char *str, struct ether_addr *haddr)
-{
-	if (ft_strlen(str) != 17)
-		return 0; // Invalid MAC address length
-
-	char nb[3];
-	nb[2] = '\0';
-
-	// Check if each byte of the MAC address is within a valid range
-	for (int i = 0; i < 6; ++i)
-	{
-		nb[0] = str[i * 3];
-		nb[1] = str[i * 3 + 1];
-		if (ft_strtol(nb, NULL, 16) == 0 && nb[0] != '0')
-			return 0; // Invalid hex number
-		haddr->ether_addr_octet[i] = ft_strtol(nb, NULL, 16);
-	}
-
-	return 1; // Valid MAC address
 }
 
 void send_arp_reply(uint8_t *host_ip, uint8_t *host_mac, uint8_t *requested_ip, struct sockaddr_ll *recv_addr)
@@ -181,10 +168,12 @@ int handle_arp_packets()
 	socklen_t recv_addr_len = sizeof(recv_addr);
 	char recv_buf[ETH_FRAME_LEN];
 	int recv_len;
+	char target_ip_str[INET_ADDRSTRLEN];
 
 	struct sigaction act;
 	act.sa_handler = handle_sigint;
-	sigemptyset(&act.sa_mask);
+	act.sa_flags = 0;
+	ft_bzero(&act.sa_mask, sizeof(act.sa_mask));
 
 	if (sigaction(SIGINT, &act, NULL) < 0)
 	{
@@ -194,8 +183,13 @@ int handle_arp_packets()
 
 	while (g_env.loop)
 	{
-		memset(&recv_addr, 0, sizeof(recv_addr));
-		printf("\n   Waiting for arp request from target (%s)...\n", inet_ntoa(g_env.host.ip_addr));
+		ft_memset(&recv_addr, 0, sizeof(recv_addr));
+		if (g_env.given_host_type == IP_ADDRESS)
+			printf("\n   Waiting for arp request from target (%s)...\n", inet_ntop(AF_INET, &g_env.host.ip_addr, target_ip_str, sizeof(target_ip_str)));
+		else if (g_env.given_host_type == MAC_ADDRESS)
+			printf("\n   Waiting for arp request from target (%s)...\n", ft_ether_ntoa(&g_env.host.mac_addr));
+		else
+			printf("\n   Waiting for arp request from target (%s)...\n", g_env.host.h_name);
 		recv_len = recvfrom(g_env.sfd, recv_buf, ETH_FRAME_LEN, 0, (struct sockaddr *)&recv_addr, &recv_addr_len);
 		if (recv_len == -1 && g_env.loop)
 		{
@@ -241,7 +235,6 @@ int handle_arp_packets()
 struct ifaddrs *find_interface(struct ifaddrs *ifaddr)
 {
 	struct ifaddrs *ifa;
-
 	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
 	{
 		// check if interface is up and has a broadcast address
@@ -260,7 +253,7 @@ struct ifaddrs *find_interface(struct ifaddrs *ifaddr)
 			// check if the broadcast address is from the same network using the ifa_netmask
 			struct sockaddr_in *mask = (struct sockaddr_in *)ifa->ifa_netmask;
 
-			if ((g_env.host.ip_addr.s_addr & mask->sin_addr.s_addr) == (broad_addr->sin_addr.s_addr & mask->sin_addr.s_addr))
+			if (g_env.given_host_type == MAC_ADDRESS || (g_env.host.ip_addr.s_addr & mask->sin_addr.s_addr) == (broad_addr->sin_addr.s_addr & mask->sin_addr.s_addr))
 			{
 				printf("Found interface %s\n", ifa->ifa_name);
 				return ifa;
@@ -271,8 +264,9 @@ struct ifaddrs *find_interface(struct ifaddrs *ifaddr)
 				for (int i = 0; g_env.host.ip_list[i] != NULL; i++)
 				{
 					in_addr_t ip = *(in_addr_t *)g_env.host.ip_list[i];
+					char ip_str[INET_ADDRSTRLEN];
 					if (g_env.verbose)
-						printf("Checking if %s is in the same network as %s\n", inet_ntoa(*(struct in_addr *)&ip), broad_addr_str);
+						printf("Checking if %s is in the same network as %s\n", inet_ntop(AF_INET, &ip, ip_str, sizeof(ip_str)), broad_addr_str);
 					// print results of bits operations
 					if ((ip & mask->sin_addr.s_addr) == (broad_addr->sin_addr.s_addr & mask->sin_addr.s_addr))
 					{
@@ -283,7 +277,7 @@ struct ifaddrs *find_interface(struct ifaddrs *ifaddr)
 					else
 					{
 						if (g_env.verbose)
-							printf("%s is not in the same network as %s\n", inet_ntoa(*(struct in_addr *)&ip), broad_addr_str);
+							printf("%s is not in the same network as %s\n", inet_ntop(AF_INET, &ip, ip_str, sizeof(ip_str)), broad_addr_str);
 					}
 				}
 			}
@@ -350,7 +344,7 @@ int create_socket()
 	if ((interface = find_interface(ifaddr)) == NULL)
 		return 1;
 
-	// if g_env.mac_address is not set, use the interface mac address
+	// if -m option is not set, use the interface mac address
 	if (g_env.mac_address.ether_addr_octet[0] == 0 && g_env.mac_address.ether_addr_octet[1] == 0 && g_env.mac_address.ether_addr_octet[2] == 0 && g_env.mac_address.ether_addr_octet[3] == 0 && g_env.mac_address.ether_addr_octet[4] == 0 && g_env.mac_address.ether_addr_octet[5] == 0)
 	{
 		if (get_mac_address(interface->ifa_name, g_env.mac_address.ether_addr_octet) == 1)
@@ -373,8 +367,6 @@ int create_socket()
 
 int get_host(struct s_host *host, char *host_arg)
 {
-	struct hostent *hostent = NULL;
-
 	// check if host is an IP address
 	if (inet_pton(AF_INET, host_arg, &host->ip_addr) == 0)
 	{
@@ -382,17 +374,16 @@ int get_host(struct s_host *host, char *host_arg)
 		if (ft_ether_aton(host_arg, &host->mac_addr) == 0)
 		{
 			// check if host is a hostname and get its IP address if it is
-			hostent = gethostbyname(host_arg);
+			struct hostent *hostent = gethostbyname(host_arg);
 			if (hostent == NULL)
-				return -1;
+				return -1; // Invalid host
 			host->h_name = host_arg;
 			host->ip_list = hostent->h_addr_list;
-			return 2;
+			return HOSTNAME;
 		}
-		return 1;
+		return MAC_ADDRESS;
 	}
-
-	return 0;
+	return IP_ADDRESS;
 }
 
 int get_args(int argc, char **argv)
@@ -432,7 +423,7 @@ int get_args(int argc, char **argv)
 		}
 	}
 
-	if (get_host(&g_env.host, host_arg) == -1)
+	if ((g_env.given_host_type = get_host(&g_env.host, host_arg)) == -1)
 	{
 		printf("Invalid host: %s\n", host_arg);
 		return 1;
@@ -457,6 +448,8 @@ int get_args(int argc, char **argv)
 		}
 	}
 
+	if (g_env.given_host_type == MAC_ADDRESS)
+		printf("Since host given is a MAC address, the interface will be assumed...\n\n");
 	printf("Host: %s\n", host_arg);
 	if (requested_host_arg != NULL)
 		printf("Requested host: %s\n", requested_host_arg);
@@ -477,7 +470,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "You must be root to run this program.\n");
 		return 1;
 	}
-	
+
 	if (argc < 2 || argc > 7)
 	{
 		printf("Usage: %s host [-r requested_host] [-m mac_address] [-v]\n", argv[0]);
