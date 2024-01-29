@@ -91,12 +91,12 @@ void print_arp_header(struct ether_arp *arp_hdr, int recv_len)
 
 		if (inet_ntop(AF_INET, arp_hdr->arp_spa, sender_ip_str, sizeof(sender_ip_str)) == NULL)
 		{
-			strerror(errno);
+			fprintf(stderr, "print_arp_header - inet_ntop: %s\n", strerror(errno));
 			return;
 		}
 		if (inet_ntop(AF_INET, arp_hdr->arp_tpa, target_ip_str, sizeof(target_ip_str)) == NULL)
 		{
-			strerror(errno);
+			fprintf(stderr, "print_arp_header - inet_ntop: %s\n", strerror(errno));
 			return;
 		}
 
@@ -169,7 +169,7 @@ void send_arp_reply(uint8_t *host_ip, uint8_t *host_mac, uint8_t *requested_ip, 
 	// send packet to requester
 	if (sendto(g_env.sfd, buf, sizeof(buf), 0, (struct sockaddr *)recv_addr, sizeof(struct sockaddr_ll)) == -1)
 	{
-		strerror(errno);
+		fprintf(stderr, "Error sending reply: %s\n", strerror(errno));
 		return;
 	}
 	printf("\033[0;31m     Sent reply!\n\033[0m");
@@ -188,7 +188,7 @@ int handle_arp_packets()
 
 	if (sigaction(SIGINT, &act, NULL) < 0)
 	{
-		printf("%s\n", strerror(errno));
+		fprintf(stderr, "Error setting signal handler on SIGINT: %s\n", strerror(errno));
 		return 1;
 	}
 
@@ -199,7 +199,7 @@ int handle_arp_packets()
 		recv_len = recvfrom(g_env.sfd, recv_buf, ETH_FRAME_LEN, 0, (struct sockaddr *)&recv_addr, &recv_addr_len);
 		if (recv_len == -1 && g_env.loop)
 		{
-			printf("   Error receiving packet: %s\n", strerror(errno));
+			fprintf(stderr, "   Error receiving packet: %s\n", strerror(errno));
 			return 1;
 		}
 		else if (g_env.loop == false)
@@ -253,7 +253,7 @@ struct ifaddrs *find_interface(struct ifaddrs *ifaddr)
 			char broad_addr_str[INET_ADDRSTRLEN];
 			if (inet_ntop(AF_INET, &(broad_addr->sin_addr), broad_addr_str, sizeof(broad_addr_str)) == NULL)
 			{
-				strerror(errno);
+				fprintf(stderr, "find_interface - inet_ntop: %s\n", strerror(errno));
 				break;
 			}
 
@@ -305,7 +305,7 @@ int get_mac_address(char *iface, uint8_t *mac)
 	fd = open(path, O_RDONLY);
 	if (fd == -1)
 	{
-		strerror(errno);
+		fprintf(stderr, "Error opening file /sys/class/net/%s/address: %s\n", iface, strerror(errno));
 		return 1;
 	}
 
@@ -313,7 +313,7 @@ int get_mac_address(char *iface, uint8_t *mac)
 	ssize_t n = read(fd, mac_str, sizeof(mac_str) - 1);
 	if (n == -1)
 	{
-		strerror(errno);
+		fprintf(stderr, "%s\n", strerror(errno));
 		close(fd);
 		return 1;
 	}
@@ -335,7 +335,7 @@ int create_socket()
 	g_env.sfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ARP));
 	if (g_env.sfd == -1)
 	{
-		strerror(errno);
+		fprintf(stderr, "Error creating socket: %s\n", strerror(errno));
 		return 1;
 	}
 
@@ -343,7 +343,7 @@ int create_socket()
 	struct ifaddrs *ifaddr, *interface;
 	if (getifaddrs(&ifaddr) == -1)
 	{
-		strerror(errno);
+		fprintf(stderr, "getifaddrs: %s\n", strerror(errno));
 		return 1;
 	}
 
@@ -362,7 +362,7 @@ int create_socket()
 	// set interface to socket
 	if (setsockopt(g_env.sfd, SOL_SOCKET, SO_BINDTODEVICE, interface->ifa_name, ft_strlen(interface->ifa_name)) == -1)
 	{
-		strerror(errno);
+		fprintf(stderr, "Error setting interface to socket: %s\n", strerror(errno));
 		return 1;
 	}
 	freeifaddrs(ifaddr);
@@ -472,6 +472,12 @@ int get_args(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
+	if (getuid() != 0)
+	{
+		fprintf(stderr, "You must be root to run this program.\n");
+		return 1;
+	}
+	
 	if (argc < 2 || argc > 7)
 	{
 		printf("Usage: %s host [-r requested_host] [-m mac_address] [-v]\n", argv[0]);
